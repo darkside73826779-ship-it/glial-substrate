@@ -1,0 +1,86 @@
+[
+  {
+    "seed": 0,
+    "baseline": {
+      "before": {
+        "in_context_pretrain_pool": 1.0,
+        "in_context_heldout_pool": 0.1125,
+        "out_of_context_heldout": 0.0
+      },
+      "after": {
+        "in_context_pretrain_pool": 1.0,
+        "in_context_heldout_pool": 0.128125,
+        "out_of_context_heldout": 0.0
+      }
+    },
+    "substrate": {
+      "before": {
+        "in_context_pretrain_pool": 1.0,
+        "in_context_heldout_pool": 0.25,
+        "out_of_context_heldout": 0.0
+      },
+      "after": {
+        "in_context_pretrain_pool": 0.1421875,
+        "in_context_heldout_pool": 0.121875,
+        "out_of_context_heldout": 0.0
+      }
+    },
+    "meta_seconds": 127.5
+  },
+  {
+    "seed": 1,
+    "baseline": {
+      "before": {
+        "in_context_pretrain_pool": 1.0,
+        "in_context_heldout_pool": 0.3203125,
+        "out_of_context_heldout": 0.0
+      },
+      "after": {
+        "in_context_pretrain_pool": 1.0,
+        "in_context_heldout_pool": 0.2765625,
+        "out_of_context_heldout": 0.0
+      }
+    },
+    "substrate": {
+      "before": {
+        "in_context_pretrain_pool": 1.0,
+        "in_context_heldout_pool": 0.4796875,
+        "out_of_context_heldout": 0.0
+      },
+      "after": {
+        "in_context_pretrain_pool": 0.2484375,
+        "in_context_heldout_pool": 0.5296875,
+        "out_of_context_heldout": 0.015625
+      }
+    },
+    "meta_seconds": 85.2
+  },
+  {
+    "seed": 2,
+    "baseline": {
+      "before": {
+        "in_context_pretrain_pool": 1.0,
+        "in_context_heldout_pool": 0.11875,
+        "out_of_context_heldout": 0.0
+      },
+      "after": {
+        "in_context_pretrain_pool": 1.0,
+        "in_context_heldout_pool": 0.0984375,
+        "out_of_context_heldout": 0.0
+      }
+    },
+    "substrate": {
+      "before": {
+        "in_context_pretrain_pool": 1.0,
+        "in_context_heldout_pool": 0.1265625,
+        "out_of_context_heldout": 0.0
+      },
+      "after": {
+        "in_context_pretrain_pool": 0.1234375,
+        "in_context_heldout_pool": 0.20625,
+        "out_of_context_heldout": 0.1359375
+      }
+    },
+    "meta_seconds": 84.8
+  }
+]

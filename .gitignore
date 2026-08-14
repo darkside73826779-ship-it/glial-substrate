@@ -1,0 +1,12 @@
+# env / caches
+.venv/
+__pycache__/
+*.pyc
+_dg_incoming/
+_summ.py
+_h.py
+
+# run artifacts (regenerated; keep the code, not the outputs)
+metrics.jsonl
+*_results.json
+results.json

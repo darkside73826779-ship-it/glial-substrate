@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glial Substrate — Run Monitor</title>
+<style>
+  :root { --bg:#12120f; --card:#1c1c17; --line:#33332b; --txt:#e8e6da;
+          --mut:#8f8d80; --sub:#6ec6a4; --base:#8a88f0; --warn:#e8a44b;
+          --bad:#e06055; --chance:#666152; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--txt);
+         font:14px/1.5 system-ui, sans-serif; padding:20px; }
+  h1 { font-size:18px; font-weight:600; }
+  h2 { font-size:13px; font-weight:600; color:var(--mut);
+       text-transform:uppercase; letter-spacing:.06em; margin-bottom:8px; }
+  #head { display:flex; gap:16px; align-items:baseline; flex-wrap:wrap;
+          margin-bottom:16px; }
+  #status { font-size:12px; color:var(--mut); }
+  #status.live::before { content:"●"; color:var(--sub); margin-right:6px;
+                         animation:pulse 1.4s infinite; }
+  #status.stale::before { content:"●"; color:var(--warn); margin-right:6px; }
+  @keyframes pulse { 50% { opacity:.3 } }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr));
+          gap:14px; }
+  .card { background:var(--card); border:1px solid var(--line);
+          border-radius:10px; padding:14px; }
+  canvas { width:100%; height:150px; display:block; }
+  .legend { display:flex; gap:14px; font-size:12px; color:var(--mut);
+            margin-top:6px; flex-wrap:wrap; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%;
+         margin-right:5px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { text-align:right; padding:4px 8px; border-bottom:1px solid var(--line); }
+  th:first-child, td:first-child { text-align:left; }
+  th { color:var(--mut); font-weight:500; }
+  .good { color:var(--sub); } .flat { color:var(--mut); }
+  .flags { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+  .flag { font-size:12px; padding:3px 10px; border-radius:20px;
+          border:1px solid var(--line); color:var(--mut); }
+  .flag.on-warn { border-color:var(--warn); color:var(--warn); }
+  .flag.on-bad  { border-color:var(--bad);  color:var(--bad); }
+  .flag.on-good { border-color:var(--sub);  color:var(--sub); }
+  #cfg { font-size:12px; color:var(--mut); }
+</style>
+</head>
+<body>
+<div id="head">
+  <h1>Glial substrate — run monitor</h1>
+  <span id="run" style="color:var(--mut)"></span>
+  <span id="status">waiting for metrics.jsonl…</span>
+</div>
+<div class="flags" id="flags"></div>
+<div class="grid">
+  <div class="card"><h2>Loss — pretrain</h2><canvas id="c_pre"></canvas>
+    <div class="legend"><span><span class="dot" style="background:var(--sub)"></span>substrate</span>
+    <span><span class="dot" style="background:var(--base)"></span>baseline</span></div></div>
+  <div class="card"><h2>Loss — runtime exposure (no gradients)</h2><canvas id="c_exp"></canvas>
+    <div class="legend"><span><span class="dot" style="background:var(--sub)"></span>substrate</span>
+    <span><span class="dot" style="background:var(--base)"></span>baseline</span></div></div>
+  <div class="card"><h2>Plasticity gates (mean, 0–1)</h2><canvas id="c_gate"></canvas>
+    <div class="legend"><span>closed = no writing permitted · saturated = check §3 ladder before touching bounds</span></div></div>
+  <div class="card"><h2>Fast-weight magnitude (mean |fast|)</h2><canvas id="c_fast"></canvas>
+    <div class="legend"><span>runtime memory accumulating; plateau under load may mean budget pinning</span></div></div>
+  <div class="card"><h2>Consolidation (mean)</h2><canvas id="c_cons"></canvas>
+    <div class="legend"><span>protection against overwriting; grows where updates keep agreeing</span></div></div>
+  <div class="card"><h2>Neuromodulator (surprise broadcast)</h2><canvas id="c_neur"></canvas>
+    <div class="legend"><span>0.5 = resting · high = recent surprise, plasticity favored</span></div></div>
+  <div class="card"><h2>Meta-training — probe loss / episode</h2><canvas id="c_mprobe"></canvas>
+    <div class="legend"><span>out-of-context probe loss per episode · falling = gates learning to write</span></div></div>
+  <div class="card"><h2>Meta-training — gate mean &amp; GateNet grad</h2><canvas id="c_mgate"></canvas>
+    <div class="legend"><span><span class="dot" style="background:var(--sub)"></span>gate mean (0–1)</span>
+    <span><span class="dot" style="background:var(--warn)"></span>GateNet grad-norm</span></div></div>
+  <div class="card" style="grid-column:1/-1"><h2>Probes — recall accuracy</h2>
+    <table id="probes"><thead><tr><th>model / probe</th><th>before</th><th>after</th><th>Δ</th></tr></thead>
+    <tbody></tbody></table>
+    <div class="legend" id="chanceNote"></div></div>
+  <div class="card" style="grid-column:1/-1"><h2>Oracle dose-response (diagnostic)</h2>
+    <table id="dose"><thead><tr><th>budget</th><th>alpha</th><th>delivered dose</th><th>logit shift</th><th>recall</th></tr></thead>
+    <tbody></tbody></table>
+    <div class="legend"><span>oracle-write positive control · recall staying at chance while logit-shift rises = signal delivered but not retrievable</span></div></div>
+  <div class="card" style="grid-column:1/-1"><h2>Load test: DG vs softmax</h2><canvas id="c_load"></canvas>
+    <div class="legend"><span><span class="dot" style="background:var(--sub)"></span>DG recall</span>
+    <span><span class="dot" style="background:var(--base)"></span>softmax recall</span>
+    <span id="loadnote"></span></div></div>
+  <div class="card" style="grid-column:1/-1"><h2>DG viability sweep — recall per config</h2><canvas id="c_sweep"></canvas>
+    <div class="legend"><span><span class="dot" style="background:var(--sub)"></span>DG+completion recall</span>
+    <span><span class="dot" style="background:var(--warn)"></span>best DG so far</span>
+    <span><span class="dot" style="background:var(--base)"></span>raw+completion baseline</span>
+    <span id="sweepnote"></span></div></div>
+  <div class="card" style="grid-column:1/-1"><h2>Run config</h2><div id="cfg">—</div></div>
+</div>
+
+<script>
+"use strict";
+const COLORS = { substrate: getCss("--sub"), baseline: getCss("--base") };
+function getCss(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+
+let lastSize = -1, lastDataTime = 0, chance = 0.0625;
+
+function drawSeries(canvasId, seriesMap, opts = {}) {
+  const cv = document.getElementById(canvasId);
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const ctx = cv.getContext("2d"); ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+  let lo = opts.min ?? Infinity, hi = opts.max ?? -Infinity;
+  const auto = opts.min === undefined;
+  for (const pts of Object.values(seriesMap))
+    for (const y of pts) { if (auto){ if (y<lo)lo=y; if (y>hi)hi=y; } }
+  if (!isFinite(lo)) { lo = 0; hi = 1; }
+  if (hi - lo < 1e-9) { hi = lo + 1e-9; }
+  const pad = 6, X = i => pad + i, sx = n => (w - 2*pad) / Math.max(n - 1, 1);
+  const Y = v => h - pad - (v - lo) / (hi - lo) * (h - 2*pad);
+  ctx.strokeStyle = getCss("--line"); ctx.lineWidth = 1;
+  ctx.strokeRect(0.5, 0.5, w-1, h-1);
+  if (opts.hline !== undefined && opts.hline >= lo && opts.hline <= hi) {
+    ctx.strokeStyle = getCss("--chance"); ctx.setLineDash([4,4]);
+    ctx.beginPath(); ctx.moveTo(pad, Y(opts.hline)); ctx.lineTo(w-pad, Y(opts.hline));
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+  for (const [name, pts] of Object.entries(seriesMap)) {
+    if (!pts.length) continue;
+    const step = sx(pts.length);
+    ctx.strokeStyle = COLORS[name] || getCss("--warn");
+    ctx.lineWidth = 1.5; ctx.beginPath();
+    pts.forEach((v, i) => { const x = pad + i*step, y = Y(v);
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.stroke();
+  }
+  ctx.fillStyle = getCss("--mut"); ctx.font = "10px system-ui";
+  ctx.fillText(hi.toPrecision(3), pad+2, 12);
+  ctx.fillText(lo.toPrecision(3), pad+2, h-8);
+}
+
+function setFlag(id, label, state) {
+  let el = document.getElementById("flag_"+id);
+  if (!el) { el = document.createElement("span"); el.id = "flag_"+id;
+    el.className = "flag"; document.getElementById("flags").appendChild(el); }
+  el.textContent = label;
+  el.className = "flag" + (state ? " on-"+state : "");
+}
+
+function render(rows) {
+  const by = (model, phase, field) => rows
+    .filter(r => r.model === model && r.phase === phase && r[field] !== undefined)
+    .map(r => r[field]);
+  drawSeries("c_pre", { substrate: by("substrate","pretrain","loss"),
+                        baseline:  by("baseline","pretrain","loss") });
+  drawSeries("c_exp", { substrate: by("substrate","exposure","loss"),
+                        baseline:  by("baseline","exposure","loss") });
+  const gates = by("substrate","exposure","gate_mean");
+  drawSeries("c_gate", { substrate: gates }, { min:0, max:1 });
+  drawSeries("c_fast", { substrate: by("substrate","exposure","fast_abs_mean") }, { min:0 });
+  drawSeries("c_cons", { substrate: by("substrate","exposure","consol_mean") }, { min:0 });
+  drawSeries("c_neur", { substrate: by("substrate","exposure","neuromod") },
+             { min:0, max:1, hline:0.5 });
+
+  // Meta-training phase (logged by scripts/meta_train.py). Observer only.
+  const meta = f => rows.filter(r => r.phase === "meta" && r[f] !== undefined)
+                        .map(r => r[f]);
+  drawSeries("c_mprobe", { substrate: meta("probe_loss") }, { min:0 });
+  drawSeries("c_mgate", { substrate: meta("gate_mean"), grad: meta("gatenet_gradnorm") },
+             { min:0 });
+
+  // Health flags (observations only — the dashboard never acts on them).
+  const gLast = gates.at(-1);
+  setFlag("gates", gLast === undefined ? "gates: no data yet"
+    : gLast < 0.02 ? "gates collapsed (~0) — see DESIGN.md failure modes"
+    : gLast > 0.98 ? "gates saturated (~1) — see §3 ladder"
+    : "gates active: " + gLast.toFixed(3),
+    gLast === undefined ? null : gLast < 0.02 || gLast > 0.98 ? "warn" : "good");
+  const bad = rows.some(r => ["loss","fast_abs_mean","consol_mean"]
+    .some(k => r[k] !== undefined && !isFinite(r[k])));
+  setFlag("finite", bad ? "NaN/Inf detected — invariant I-8 territory"
+                        : "all values finite", bad ? "bad" : "good");
+
+  // Probe table.
+  const probes = rows.filter(r => r.phase === "probe");
+  const tb = document.querySelector("#probes tbody"); tb.innerHTML = "";
+  const fields = ["out_of_context_heldout","in_context_heldout_pool",
+                  "in_context_pretrain_pool"];
+  const label = { out_of_context_heldout:"out-of-context (the prize)",
+                  in_context_heldout_pool:"in-context, held-out pool",
+                  in_context_pretrain_pool:"in-context, pretrain pool" };
+  for (const m of ["substrate","baseline"]) {
+    const B = probes.find(r => r.model===m && r.when==="before") || {};
+    const A = probes.find(r => r.model===m && r.when==="after") || {};
+    for (const f of fields) {
+      if (B[f] === undefined && A[f] === undefined) continue;
+      const d = (A[f] !== undefined && B[f] !== undefined) ? A[f]-B[f] : null;
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${m} · ${label[f]}</td>` +
+        `<td>${B[f]?.toFixed(3) ?? "—"}</td><td>${A[f]?.toFixed(3) ?? "—"}</td>` +
+        `<td class="${d===null?"":d>0.01?"good":"flat"}">` +
+        `${d===null?"—":(d>=0?"+":"")+d.toFixed(3)}</td>`;
+      tb.appendChild(tr);
+    }
+  }
+  document.getElementById("chanceNote").textContent =
+    "chance level: " + chance.toFixed(3) +
+    " — the experiment's headline is substrate out-of-context Δ vs baseline";
+
+  // Load test DG vs softmax (phase==='load'). Observer only.
+  const ld = rows.filter(r => r.phase === "load");
+  if (ld.length) {
+    drawSeries("c_load", { substrate: ld.map(r => r.dg_recall),
+                           baseline: ld.map(r => r.softmax_recall) },
+              { min: 0, max: 1 });
+    const last = ld.at(-1);
+    document.getElementById("loadnote").textContent =
+      "points " + ld.length + " · last load " + last.load + " noise " +
+      last.noise + " → DG " + last.dg_recall?.toFixed(2) + " / sm " +
+      last.softmax_recall?.toFixed(2);
+  }
+
+  // DG viability sweep (phase==='sweep'). Observer only.
+  const sw = rows.filter(r => r.phase === "sweep");
+  if (sw.length) {
+    const rec = sw.map(r => r.out_of_context_heldout).filter(v => v !== undefined);
+    const bestdg = sw.map(r => r.best_dg).filter(v => v !== undefined);
+    const rawb = sw.at(-1).raw_best;
+    const rawline = rec.map(() => rawb);
+    drawSeries("c_sweep", { substrate: rec, warn: bestdg, baseline: rawline },
+               { min: 0, max: 1 });
+    document.getElementById("sweepnote").textContent =
+      "configs " + sw.length + " · best DG " +
+      (bestdg.at(-1)?.toFixed(3) ?? "—") + " vs raw " +
+      (rawb?.toFixed(3) ?? "—");
+  }
+
+  // Oracle dose-response (phase==='dose'). Observer only.
+  const doseRows = rows.filter(r => r.phase === "dose");
+  const dtb = document.querySelector("#dose tbody"); dtb.innerHTML = "";
+  for (const r of doseRows) {
+    const tr = document.createElement("tr");
+    const good = r.out_of_context_heldout > chance + 0.10;
+    tr.innerHTML = `<td>${r.budget ?? "—"}${r.linear?" (lin)":""}</td>` +
+      `<td>${r.alpha?.toFixed?.(2) ?? "—"}</td>` +
+      `<td>${r.delivered_dose?.toFixed?.(3) ?? "—"}</td>` +
+      `<td>${r.logit_shift?.toFixed?.(3) ?? "—"}</td>` +
+      `<td class="${good?"good":"flat"}">${r.out_of_context_heldout?.toFixed?.(3) ?? "—"}</td>`;
+    dtb.appendChild(tr);
+  }
+}
+
+async function poll() {
+  try {
+    const res = await fetch("../metrics.jsonl", { cache: "no-store" });
+    if (!res.ok) throw 0;
+    const text = await res.text();
+    if (text.length !== lastSize) {
+      lastSize = text.length; lastDataTime = Date.now();
+      const rows = text.split("\n").filter(Boolean).map(l => {
+        try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+      const start = rows.find(r => r.event === "run_start");
+      if (start) {
+        document.getElementById("run").textContent = start.run || "";
+        chance = start.config?.chance ?? chance;
+        document.getElementById("cfg").textContent =
+          JSON.stringify(start.config || {});
+      }
+      render(rows);
+    }
+    const fresh = Date.now() - lastDataTime < 15000;
+    const st = document.getElementById("status");
+    st.className = fresh ? "live" : "stale";
+    st.textContent = fresh ? "live" : "no new data " +
+      Math.round((Date.now()-lastDataTime)/1000) + "s";
+  } catch {
+    const st = document.getElementById("status");
+    st.className = ""; st.textContent =
+      "metrics.jsonl not reachable — serve the run dir: python -m http.server";
+  }
+  setTimeout(poll, 2000);
+}
+poll();
+</script>
+</body>
+</html>
